@@ -1,0 +1,111 @@
+- name: Install python libs for Kubernetes modules
+  become: yes
+  ansible.builtin.apt:
+    name:
+      - python3-pip
+      - python3-kubernetes
+      - python3-yaml
+    state: present
+    update_cache: yes
+
+- name: Ensure namespace exists
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ namespace }}"
+
+- name: Create secret docker-registry
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: acr-secret
+        namespace: "{{ namespace }}"
+      type: kubernetes.io/dockerconfigjson
+      data:
+        .dockerconfigjson: >-
+          {{ {
+            "auths": {
+              "{{ acr_url }}": {
+                "username": acr_username,
+                "password": acr_password,
+                "auth": (acr_username ~ ":" ~ acr_password) | b64encode
+              }
+            }
+          } | to_json | b64encode }}
+
+- name: Create PVC
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: "{{ pvc_name }}"
+        namespace: "{{ namespace }}"
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: "{{ pv_size }}"
+
+- name: Deployment app
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: nginx-deploy
+        namespace: "{{ namespace }}"
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: nginx-app
+        template:
+          metadata:
+            labels:
+              app: nginx-app
+          spec:
+            containers:
+              - name: nginx
+                image: nginx:1.29.5
+                ports:
+                  - containerPort: 80
+                volumeMounts:
+                  - name: nginx-volume
+                    mountPath: /data
+            volumes:
+              - name: nginx-volume
+                persistentVolumeClaim:
+                  claimName: "{{ pvc_name }}"
+            imagePullSecrets:
+              - name: acr-secret
+
+- name: Create LoadBalancer
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: "{{ service_name }}"
+        namespace: "{{ namespace }}"
+      spec:
+        type: LoadBalancer
+        selector:
+          app: nginx-app
+        ports:
+          - port: 80
+            targetPort: 80
