@@ -1,0 +1,33 @@
+- name: Install Podman
+  ansible.builtin.apt:
+    name: podman
+    state: present
+    update_cache: yes
+
+- name: Settings ACR
+  set_fact:
+    acr_url: "{{ acr_url }}"
+    acr_username: "{{ acr_username }}"
+    acr_password: "{{ acr_password }}"
+
+- name: ACR Login
+  containers.podman.podman_login:
+    registry: "{{ acr_url }}"
+    username: "{{ acr_username }}"
+    password: "{{ acr_password }}"
+
+- name: Pull a specific version of an image
+  containers.podman.podman_image:
+    name: docker.io/nginx
+    tag: alpine
+
+- name: Tag images
+  containers.podman.podman_tag:
+  image: docker.io/nginx:alpine
+  target_names:
+    - crcp2.azurecr.io/nginx:casopractico2
+
+- name: Push the image to ACR
+  containers.podman.podman_image:
+    name: crcp2.azurecr.io/nginx:casopractico2
+    push: true
