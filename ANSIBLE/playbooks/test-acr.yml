@@ -1,0 +1,9 @@
+- name: Run ACR role
+  hosts: servidor1
+  become: yes
+
+  vars_files:
+    - ../group_vars/vault.yml
+
+  roles:
+    - acr
