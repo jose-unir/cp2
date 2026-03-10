@@ -1,0 +1,107 @@
+- name: Update repo
+  become: yes
+  ansible.builtin.apt:
+    update_cache: yes
+
+- name: Install Podman
+  become: yes
+  ansible.builtin.apt:
+    name: podman
+    state: present
+
+- name: Create Volume
+  become: yes
+  ansible.builtin.file:
+    path: "{{ host_volume_path }}"
+    state: directory
+    mode: "0755"
+
+- name: Create authentication "htpasswd"
+  become: yes
+  ansible.builtin.copy:
+    dest: "{{ host_volume_path }}/htpasswd"
+    mode: "0600"
+    content: "{{ auth_user }}:{{ auth_password | password_hash('bcrypt') }}"
+
+- name: Login ACR
+  no_log: true
+  become: yes
+  containers.podman.podman_login:
+    registry: "{{ acr_url }}"
+    username: "{{ acr_username }}"
+    password: "{{ acr_password }}"
+
+- name: Pull images from ACR
+  become: yes
+  containers.podman.podman_image:
+    name: "{{ acr_url }}/{{ image_name }}"
+    tag: "{{ image_tag }}"
+    state: present
+
+- name: Create directorio Quadlet
+  become: yes
+  ansible.builtin.file:
+    path: "{{ quadlet_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Create Quadlet .container
+  become: yes
+  ansible.builtin.copy:
+    dest: "{{ quadlet_dir }}/{{ container_name }}.container"
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Run Nginx using podman from ACR
+
+      [Container]
+      Image={{ acr_url }}/{{ image_name }}:{{ image_tag }}
+      ContainerName={{ container_name }}
+      Volume={{ host_volume_path }}:{{ container_volume_path }}
+      Volume={{ host_volume_path }}/htpasswd:/etc/nginx/htpasswd
+      PublishPort=8080:80
+      Restart=always
+
+      [Install]
+      WantedBy=multi-user.target
+
+- name: Ensure quadlet (podman-quadlet) is present when available
+  become: yes
+  ansible.builtin.package:
+    name: podman-quadlet
+    state: present
+  register: quadlet_pkg
+  ignore_errors: yes
+
+- name: Daemon reload to pick up Quadlet units
+  become: yes
+  ansible.builtin.systemd:
+    daemon_reload: yes
+
+- name: Check generated Quadlet unit exists
+  become: yes
+  ansible.builtin.stat:
+    path: "/run/systemd/generator/{{ container_name }}.service"
+  register: quadlet_unit_stat
+
+- name: Enable & start Quadlet service (if unit exists)
+  become: yes
+  ansible.builtin.systemd:
+    name: "{{ container_name }}.service"
+    state: started
+    enabled: yes
+  when: quadlet_unit_stat.stat.exists
+
+- name: Fallback - Ensure container is running without Quadlet
+  become: yes
+  containers.podman.podman_container:
+    name: "{{ container_name }}"
+    image: "{{ acr_url }}/{{ image_name }}:{{ image_tag }}"
+    state: started
+    recreate: false
+    publish:
+      - "8080:80"
+    volumes:
+      - "{{ host_volume_path }}:{{ container_volume_path }}:Z"
+      - "{{ host_volume_path }}/htpasswd:/etc/nginx/htpasswd:Z"
+  when: not quadlet_unit_stat.stat.exists
