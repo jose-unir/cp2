@@ -1,0 +1,20 @@
+acr_url: "crcp2.azurecr.io"
+acr_username: "crcp2"
+
+image_name: "nginx"
+image_tag: "casopractico2"
+
+# VM deployment
+container_name: "nginx_cp2"
+host_volume_path: "/opt/nginx"
+container_volume_path: "/usr/share/nginx/html"
+quadlet_dir: "/etc/containers/systemd"
+
+# Basic auth user
+auth_user: "jose-unir"
+
+# AKS configuration
+namespace: "cp2"
+pvc_name: "nginx-pvc"
+pv_size: "1Gi"
+service_name: "nginx-lb"
